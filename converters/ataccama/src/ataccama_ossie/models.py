@@ -22,7 +22,7 @@ Ataccama Catalog API structure (public REST API, /catalog/v1):
     ├── urn, name, description (Slate rich-text JSON), originPath
     ├── connection {urn}
     ├── source {urn}
-    ├── locations[] {name, description}   # folder-name hierarchy (leaf-first)
+    ├── locations[] {urn, name, description}   # location hierarchy (leaf-first)
     ├── termAssignments[] {termUrn}
     ├── effectiveStewardship {groupUrn}
     ├── primaryDqMonitor {urn}
@@ -66,10 +66,11 @@ class TermAssignment:
 class CatalogLocation:
     name: str
     description: str | None = None
+    urn: str = ""
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CatalogLocation:
-        return cls(name=d.get("name", ""), description=d.get("description"))
+        return cls(name=d.get("name", ""), description=d.get("description"), urn=d.get("urn", ""))
 
 
 @dataclass
@@ -156,14 +157,19 @@ class CatalogItemBundle:
     item: CatalogItem
     attributes: list[CatalogAttribute] = field(default_factory=list)
     terms: dict[str, Term] = field(default_factory=dict)
-    # Raw DqResults payload (overall + per-dimension + per-attribute quality), or None.
+    # Raw DqEvaluationResults payload (overall + per-dimension + per-attribute quality), or None.
     dq_results: dict[str, Any] | None = None
     # The monitor's configured overall DQ threshold (0-100), or None if not set.
     dq_threshold_pct: float | None = None
-    # Primary keys: [{"name": str, "columns": [ordered column names]}].
-    primary_keys: list[dict[str, Any]] = field(default_factory=list)
-    # Foreign keys: [{"name", "columns": [local cols], "referenced_table", "referenced_columns"}].
+    # The primary key, or None if the item has none: {"name": str, "columns": [ordered column names]}.
+    primary_key: dict[str, Any] | None = None
+    # Unique indexes: [{"name": str, "columns": [ordered column names]}].
+    unique_indexes: list[dict[str, Any]] = field(default_factory=list)
+    # Foreign keys: [{"name", "columns": [local cols], "referenced_schema", "referenced_table",
+    # "referenced_columns"}].
     foreign_keys: list[dict[str, Any]] = field(default_factory=list)
+    # Name of the schema location the item sits in, or None if it is not in one.
+    schema_name: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CatalogItemBundle:
@@ -173,8 +179,10 @@ class CatalogItemBundle:
             terms={urn: Term.from_dict(t) for urn, t in d.get("terms", {}).items()},
             dq_results=d.get("dq_results"),
             dq_threshold_pct=d.get("dq_threshold_pct"),
-            primary_keys=list(d.get("primary_keys", [])),
+            primary_key=d.get("primary_key"),
+            unique_indexes=list(d.get("unique_indexes", [])),
             foreign_keys=list(d.get("foreign_keys", [])),
+            schema_name=d.get("schema_name"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -185,8 +193,10 @@ class CatalogItemBundle:
             "terms": {urn: _dataclass_to_raw_term(t) for urn, t in self.terms.items()},
             "dq_results": self.dq_results,
             "dq_threshold_pct": self.dq_threshold_pct,
-            "primary_keys": self.primary_keys,
+            "primary_key": self.primary_key,
+            "unique_indexes": self.unique_indexes,
             "foreign_keys": self.foreign_keys,
+            "schema_name": self.schema_name,
         }
 
 
@@ -198,7 +208,7 @@ def _dataclass_to_raw_item(item: CatalogItem) -> dict[str, Any]:
         "originPath": item.origin_path,
         "connection": {"urn": item.connection_urn} if item.connection_urn else None,
         "source": {"urn": item.source_urn} if item.source_urn else None,
-        "locations": [{"name": loc.name, "description": loc.description} for loc in item.locations],
+        "locations": [{"urn": loc.urn, "name": loc.name, "description": loc.description} for loc in item.locations],
         "termAssignments": [{"termUrn": t.term_urn} for t in item.term_assignments],
         "effectiveStewardship": ({"groupUrn": item.stewardship_group_urn} if item.stewardship_group_urn else None),
         "primaryDqMonitor": ({"urn": item.primary_dq_monitor_urn} if item.primary_dq_monitor_urn else None),
